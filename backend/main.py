@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from sqlalchemy.orm import Session
 from core.database import Base, engine, SessionLocal
 from core.models import User, DoctorPatientAssignment, ClinicalRecord, DailyJournal
@@ -33,20 +33,40 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(doctor_router, prefix=API_PREFIX)
 app.include_router(patient_router, prefix=API_PREFIX)
 
+def ensure_doctor_note_columns():
+    """
+    Safely inspects the table columns first so PostgreSQL never enters a failed transaction block.
+    """
+    try:
+        inspector = inspect(engine)
+        if "clinical_records" not in inspector.get_table_names():
+            return
 
-def ensure_doctor_note_columns_exist():
-    """
-    Safely adds doctor_custom_note and doctor_note_updated_at if an older database table already exists.
-    """
-    with engine.begin() as conn:
-        try:
-            conn.execute(text("ALTER TABLE clinical_records ADD COLUMN doctor_custom_note TEXT DEFAULT ''"))
-        except Exception:
-            pass
-        try:
-            conn.execute(text("ALTER TABLE clinical_records ADD COLUMN doctor_note_updated_at TIMESTAMP NULL"))
-        except Exception:
-            pass
+        existing_cols = {col["name"] for col in inspector.get_columns("clinical_records")}
+
+        if "doctor_custom_note" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE clinical_records ADD COLUMN doctor_custom_note TEXT"))
+
+        if "doctor_note_updated_at" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE clinical_records ADD COLUMN doctor_note_updated_at TIMESTAMP"))
+    except Exception as e:
+        print(f"Schema check note: {e}")
+
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+    ensure_doctor_note_columns()
+    db = SessionLocal()
+    try:
+        seed_initial_hackathon_data(db)
+    except Exception as e:
+        db.rollback()
+        print(f"Seed check note: {e}")
+    finally:
+        db.close()
 
 
 def seed_initial_hackathon_data(db: Session):
