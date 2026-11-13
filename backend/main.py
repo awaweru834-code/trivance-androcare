@@ -15,8 +15,8 @@ from routers.patient_router import router as patient_router
 
 app = FastAPI(
     title="Tri-Vance AndroCare RBAC & Clinical CDSS API",
-    version="3.2.0",
-    description="Role-Based Male Fertility Clinical Decision Support, Doctor Notes & 75-Day Patient Journal Backend",
+    version="3.1.0",
+    description="Role-Based Male Fertility Clinical Decision Support, Doctor's Note & 75-Day Patient Journal Backend",
 )
 
 app.add_middleware(
@@ -32,6 +32,7 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(doctor_router, prefix=API_PREFIX)
 app.include_router(patient_router, prefix=API_PREFIX)
+
 
 def ensure_doctor_note_columns():
     """
@@ -55,27 +56,41 @@ def ensure_doctor_note_columns():
         print(f"Schema check note: {e}")
 
 
-@app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-    ensure_doctor_note_columns()
-    db = SessionLocal()
-    try:
-        seed_initial_hackathon_data(db)
-    except Exception as e:
-        db.rollback()
-        print(f"Seed check note: {e}")
-    finally:
-        db.close()
-
-
 def seed_initial_hackathon_data(db: Session):
-    if db.query(User).first():
+    existing_admin = db.query(User).filter(User.email == "admin@trivance.med").first()
+    if existing_admin:
+        existing_admin.full_name = "Hospital System Admin"
+        db.commit()
+
+        patients = db.query(User).filter(User.role == "PATIENT").all()
+        for pt in patients:
+            has_journals = db.query(DailyJournal).filter(DailyJournal.patient_id == pt.id).first()
+            if not has_journals:
+                for day, sc, mood, note in [
+                    (1, 80, 7, "Day 1 of the 75-day spermatogenesis cycle logged."),
+                    (7, 100, 8, "Completed full week of heat protection and clean nutrition."),
+                    (14, 100, 9, "Feeling strong consistency with the lifestyle protocol."),
+                ]:
+                    db.add(
+                        DailyJournal(
+                            patient_id=pt.id,
+                            cycle_day=day,
+                            avoided_tobacco_alcohol=True,
+                            heat_and_toxin_protection=True,
+                            balanced_nutrition_exercise=True,
+                            zero_exogenous_steroids=True,
+                            sleep_hours=7.5,
+                            mood_score=mood,
+                            daily_vitality_score=sc,
+                            personal_reflection=note,
+                        )
+                    )
+        db.commit()
         return
 
-    # 1. System Admin
+    # 1. Neutral Hospital System Admin
     admin = User(
-        full_name="Wandimi Anthony (System Admin)",
+        full_name="Hospital System Admin",
         email="admin@trivance.med",
         password_hash=hash_password("admin123"),
         role="ADMIN",
@@ -98,7 +113,7 @@ def seed_initial_hackathon_data(db: Session):
         license_number="KMPDC-9948",
     )
 
-    # 3. Patients
+    # 3. Dummy Patients
     pt_michael = User(
         full_name="Michael Ochieng",
         email="michael@patient.med",
@@ -132,7 +147,7 @@ def seed_initial_hackathon_data(db: Session):
     for u in [admin, dr_kaswii, dr_abigail, pt_michael, pt_david, pt_james]:
         db.refresh(u)
 
-    # 4. Assign Michael & David to Dr. Kaswii; Assign James to Dr. Abigail
+    # 4. Assignments
     db.add_all(
         [
             DoctorPatientAssignment(doctor_id=dr_kaswii.id, patient_id=pt_michael.id, assigned_by_id=admin.id),
@@ -142,7 +157,7 @@ def seed_initial_hackathon_data(db: Session):
     )
     db.commit()
 
-    # 5. Seed Clinical Evaluations + Custom Doctor Notes
+    # 5. Seed Clinical Evaluations + Personalized Doctor's Notes
     sample_cases = [
         (
             pt_michael,
@@ -165,10 +180,10 @@ def seed_initial_hackathon_data(db: Session):
                 recurrent_pregnancy_loss=True,
                 upcoming_gonadotoxic_therapy=False,
                 doctor_custom_note=(
-                    "Hello Michael — Your baseline testosterone and hormone axis look strong (410 ng/dL). "
-                    "Because we detected a clinically palpable varicocele alongside reduced sperm count and motility, "
-                    "we will schedule a microsurgical varicocelectomy consult and a Sperm DNA Fragmentation check. "
-                    "Keep up your excellent consistency on the 75-day lifestyle journal!"
+                    "Hi Michael — Your endocrine hormone levels (Testosterone 410 ng/dL, FSH 6.1 mIU/mL) are healthy. "
+                    "Because you have a clinically palpable varicocele alongside mild OAT parameters, we will schedule "
+                    "a microsurgical varicocelectomy consult and a Sperm DNA Fragmentation assay. Keep up your great "
+                    "consistency on the 75-day lifestyle journal!"
                 ),
             ),
         ),
@@ -193,9 +208,9 @@ def seed_initial_hackathon_data(db: Session):
                 recurrent_pregnancy_loss=False,
                 upcoming_gonadotoxic_therapy=False,
                 doctor_custom_note=(
-                    "Hello David — Your hormone panel shows elevated FSH, which points toward a non-obstructive pattern. "
-                    "Please do NOT take any over-the-counter testosterone boosters, as they suppress natural sperm production. "
-                    "Our next step is a simple Karyotype and Y-chromosome microdeletion blood test so we can plan Micro-TESE + ICSI."
+                    "Hi David — Your hormone panel shows elevated FSH (22.4 mIU/mL) with low testosterone, indicating "
+                    "a non-obstructive pattern. Do not take any exogenous testosterone boosters, as they suppress natural "
+                    "signals. Our next step is a Karyotype and Y-Chromosome Microdeletion blood test before planning Micro-TESE + ICSI."
                 ),
             ),
         ),
@@ -220,9 +235,9 @@ def seed_initial_hackathon_data(db: Session):
                 recurrent_pregnancy_loss=False,
                 upcoming_gonadotoxic_therapy=False,
                 doctor_custom_note=(
-                    "Hello James — Great news on your hormones: your FSH, LH, and Testosterone (530 ng/dL) are completely normal, "
-                    "meaning your testes are actively producing sperm. The low volume and acidic pH suggest a simple blockage "
-                    "(Ejaculatory Duct Obstruction). We have ordered a quick TRUS/Pelvic MRI scan to confirm and correct it."
+                    "Hi James — Good news: your pituitary and testicular hormones (Testosterone 530 ng/dL, FSH 4.5) are "
+                    "completely normal, meaning your body is producing sperm normally. The low volume and acidic pH point "
+                    "to a simple blockage (Ejaculatory Duct Obstruction). We have ordered a TRUS/Pelvic MRI to confirm."
                 ),
             ),
         ),
@@ -247,39 +262,42 @@ def seed_initial_hackathon_data(db: Session):
             )
         )
 
-    # 6. Seed 5 entries of Patient Journal Track Record for Michael
-    sample_days = [
-        (1, True, True, False, True, 6.5, 6, 80, "Started the 75-day spermatogenesis reset today."),
-        (5, True, True, True, True, 7.5, 7, 100, "Switched to loose cotton wear and stopped heat exposure."),
-        (10, True, False, True, True, 7.0, 7, 80, "Long work shift, stayed hydrated."),
-        (15, True, True, True, True, 8.0, 8, 100, "Feeling more energetic after cutting alcohol completely."),
-        (20, True, True, True, True, 7.5, 9, 100, "Consistent morning exercise and antioxidant diet."),
-    ]
-    for day, tob, heat, nut, ster, slp, mood, sc, note in sample_days:
-        db.add(
-            DailyJournal(
-                patient_id=pt_michael.id,
-                cycle_day=day,
-                avoided_tobacco_alcohol=tob,
-                heat_and_toxin_protection=heat,
-                balanced_nutrition_exercise=nut,
-                zero_exogenous_steroids=ster,
-                sleep_hours=slp,
-                mood_score=mood,
-                daily_vitality_score=sc,
-                personal_reflection=note,
+    # 6. Seed 75-day journal entries for all 3 dummy patients
+    for pt in [pt_michael, pt_david, pt_james]:
+        for day, tob, heat, nut, ster, slp, mood, sc, note in [
+            (1, True, True, False, True, 6.5, 6, 80, "Started the 75-day spermatogenesis reset today."),
+            (5, True, True, True, True, 7.5, 7, 100, "Switched to loose cotton wear and stopped heat exposure."),
+            (10, True, False, True, True, 7.0, 7, 80, "Long work shift, stayed hydrated."),
+            (15, True, True, True, True, 8.0, 8, 100, "Feeling more energetic after cutting alcohol completely."),
+            (20, True, True, True, True, 7.5, 9, 100, "Consistent morning exercise and antioxidant diet."),
+        ]:
+            db.add(
+                DailyJournal(
+                    patient_id=pt.id,
+                    cycle_day=day,
+                    avoided_tobacco_alcohol=tob,
+                    heat_and_toxin_protection=heat,
+                    balanced_nutrition_exercise=nut,
+                    zero_exogenous_steroids=ster,
+                    sleep_hours=slp,
+                    mood_score=mood,
+                    daily_vitality_score=sc,
+                    personal_reflection=note,
+                )
             )
-        )
     db.commit()
 
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-    ensure_doctor_note_columns_exist()
+    ensure_doctor_note_columns()
     db = SessionLocal()
     try:
         seed_initial_hackathon_data(db)
+    except Exception as e:
+        db.rollback()
+        print(f"Seed check note: {e}")
     finally:
         db.close()
 
@@ -288,11 +306,13 @@ def on_startup():
 def health_check():
     return {
         "status": "online",
-        "api_docs": "http://127.0.0.1:8000/docs",
+        "api_docs": "/docs",
         "seeded_demo_logins": {
             "system_admin": "admin@trivance.med / admin123",
             "doctor_1": "kaswii@trivance.med / doctor123",
             "doctor_2": "abigail@trivance.med / doctor123",
-            "patient": "michael@patient.med / patient123",
+            "patient_1": "michael@patient.med / patient123",
+            "patient_2": "david@patient.med / patient123",
+            "patient_3": "james@patient.med / patient123",
         },
     }
