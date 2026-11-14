@@ -15,24 +15,32 @@ from routers.patient_router import router as patient_router
 
 app = FastAPI(
     title="Tri-Vance AndroCare RBAC & Clinical CDSS API",
-    version="3.1.0",
+    version="3.2.0",
     description="Role-Based Male Fertility Clinical Decision Support, Doctor's Note & 75-Day Patient Journal Backend",
 )
 
+# 1. Bulletproof CORS for all Vercel preview & production URLs + localhost (NO trailing slashes)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://frontend-psi-steel-61.vercel.app/"],
+    allow_origins=[
+        "https://frontend-psi-steel-61.vercel.app",
+        "https://frontend-9nmmtp6qc-awaweru834-workspace.vercel.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 2. Mount routers at /api/v1 AND root so requests work even if /api/v1 is omitted in Vercel env vars
 API_PREFIX = "/api/v1"
-app.include_router(auth_router, prefix=API_PREFIX)
-app.include_router(admin_router, prefix=API_PREFIX)
-app.include_router(doctor_router, prefix=API_PREFIX)
-app.include_router(patient_router, prefix=API_PREFIX)
-
+for prefix in [API_PREFIX, ""]:
+    app.include_router(auth_router, prefix=prefix)
+    app.include_router(admin_router, prefix=prefix)
+    app.include_router(doctor_router, prefix=prefix)
+    app.include_router(patient_router, prefix=prefix)
 
 def ensure_doctor_note_columns():
     """

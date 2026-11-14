@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://trivance-androcare.onrender.com/api/v1";
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL || "https://trivance-androcare.onrender.com/api/v1";
+const CLEAN_BASE = RAW_BASE.replace(/\/+$/, "");
+const API_BASE = CLEAN_BASE.endsWith("/api/v1") ? CLEAN_BASE : `${CLEAN_BASE}/api/v1`;
 
 function getAuthHeaders() {
   const token = localStorage.getItem("trivance_token");
